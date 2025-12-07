@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>🧬 Rapor Paneli</title>
+
+  <!-- Telegram WebApp SDK -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/photoswipe@5/dist/photoswipe.css">
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js" crossorigin="anonymous"></script>
+  <style>
+  :root{ --bg:#0f0f13; --surface:#15151a; --text:#eaeaea; --muted:#b6b6bf; --primary:#b69df8; --outline:#2b2b33; }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:Roboto,system-ui,Arial,sans-serif}
+    .wrap{max-width:960px;margin:0 auto;padding:16px}
+    header{position:sticky;top:0;background:var(--surface);border-bottom:1px solid var(--outline);padding:6px 8px;z-index:10}
+    h1{font-size:18px;margin:0}
+    .headerbar {display: flex;justify-content: space-between;align-items: center;}
+    .input{background:transparent;border:1px solid var(--outline);color:var(--text);padding:10px 12px;border-radius:12px;outline:none;min-width:240px}
+    .list{display:grid;gap:8px}
+    details{background:var(--surface);border:1px solid var(--outline);border-radius:14px;overflow:hidden}
+    summary{list-style:none;padding:12px 14px;cursor:pointer;font-weight:500;display:flex;justify-content:space-between;gap:12px}
+    summary::-webkit-details-marker{display:none}
+    .meta{color:var(--muted);font-size:12px}
+    .content{border-top:1px solid var(--outline);padding:12px 14px;display:grid;gap:10px}
+    img{max-width:100%;height:auto;border-radius:10px;border:1px solid var(--outline)}
+    .empty{color:var(--muted);text-align:center;padding:24px 6px}
+
+    .toolbar{display:flex;justify-content:center;gap:12px;margin:20px 0;flex-wrap:wrap}
+    .btn{border:none;border-radius:999px;font-weight:600;padding:12px 20px;font-size:15px;cursor:pointer;transition:transform .15s,box-shadow .15s;color:#121212;box-shadow:0 2px 4px rgba(0,0,0,.2)}
+    .btn:hover{transform:translateY(-2px);box-shadow:0 4px 8px rgba(0,0,0,.25)}
+    .btn.green{background:linear-gradient(135deg,#8be3b5,#63d89f)}
+    .btn.yellow{background:linear-gradient(135deg,#ffd166,#fbc531)}
+
+    /* Lightbox */
+    .gallery img.thumb{max-width:100%;height:auto;border-radius:10px;border:1px solid var(--outline);cursor:zoom-in}
+
+    /* Cevap aksiyonları */
+    .actions{display:flex;gap:10px;align-items:center;margin-top:8px}
+    .link{color:#8be3b5;text-decoration:none;font-weight:600;cursor:pointer}
+    .link:hover{text-decoration:underline}
+    .copyok{color:#b6b6bf;font-size:12px}
+ .actions {
+  display: flex;
+  justify-content: flex-end;   /* sağa hizalar */
+  align-items: center;
+  margin-top: 6px;
+  gap: 6px;
+}
+.replyBtn {
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.replyBtn:hover { color: var(--text); }
+.minilink {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 12px;
+  opacity: 0.6;
+}
+.minilink:hover { opacity: 1; }
+
+  </style>
+
+  <script type="module">
+    import PhotoSwipeLightbox from 'https://unpkg.com/photoswipe@5/dist/photoswipe-lightbox.esm.min.js';
+    window._initLightbox = () => {
+      if (window._pswp) { window._pswp.destroy(); window._pswp = null; }
+      const lb = new PhotoSwipeLightbox({
+        gallery: '.gallery',
+        children: 'a',
+        pswpModule: () => import('https://unpkg.com/photoswipe@5/dist/photoswipe.esm.min.js')
+      });
+      lb.init();
+      window._pswp = lb;
+    };
+  </script>
+</head>
+<body>
+ <header>
+  <div class="wrap headerbar">
+    <h1>🧬 Rapor Paneli</h1>
+    <div id="who" class="meta"></div>
+  </div>
+</header>
+
+  <main class="wrap">
+    <div class="toolbar">
+      <button id="studentsBtn" class="btn green">👩‍🎓 Öğrenci Listesi</button>
+      <button id="examsBtn" class="btn yellow">🧾 Sınav Listesi</button>
+    </div>
+
+    <div id="list" class="list"></div>
+    <div id="empty" class="empty" hidden>Rapor bulunamadı.</div>
+    <div id="denied" class="empty" hidden>Yetkiniz yok.</div>
+  </main>
+
+  <script>
+    // Telegram WebApp
+    const TMA = window.Telegram?.WebApp || null;
+
+    function showDenied(msg) {
+      const el = document.getElementById('denied');
+      el.hidden = false;
+      el.textContent = msg;
+    }
+    function el(tag, attrs={}, ...kids){
+      const n = document.createElement(tag);
+      for (const [k,v] of Object.entries(attrs)) {
+        if (k==='class') n.className=v;
+        else if (k==='text') n.textContent=v;
+        else n.setAttribute(k,v);
+      }
+      for (const k of kids) n.append(k);
+      return n;
+    }
+    function normalizeUploadPath(p){
+      if (!p) return '';
+      const i = p.replace(/\\/g,'/').lastIndexOf('/uploads/');
+      if (i >= 0) return p.replace(/.*\/uploads\//,'/uploads/');
+      if (p.includes('uploads/')) return '/' + p.substring(p.indexOf('uploads/'));
+      return p;
+    }
+    function absUrlClient(rel){
+      if (!rel) return '';
+      if (/^https?:\/\//i.test(rel)) return rel;
+      return location.origin + (rel.startsWith('/') ? rel : '/'+rel);
+    }
+    function buildReplyText(r, link){
+      return [
+        `Merhaba ${r.studentName || 'öğrenci'},`,
+        `"${r.examTitle || 'Sınav'}" raporun hakkında:`,
+        r.reportText ? `— Raporun: ${r.reportText}` : '— Raporun: (boş)',
+        `Detay: ${link}`
+      ].join('\n');
+    }
+ function replyRow(r, imgSrc){
+  const row = el('div', { class:'actions' });
+
+  const shareLink = r.id ? (location.origin + `/share/report/${r.id}`)
+                         : (imgSrc ? location.origin + imgSrc : location.origin);
+  const fallbackText = `${shareLink}`;
+
+  // Butonlar
+  const btnCap = el('button', { class:'replyBtn', type:'button' }, '');
+  const btnMsg = el('button', { class:'replyBtn', type:'button' }, '💬 Rapora Cevap Yaz');
+  const link   = el('a', { class:'minilink', href:shareLink, target:'_blank' }, '↗');
+  row.append(btnCap, btnMsg, link);
+
+  // Telegram açıcı: yalnızca https://t.me/... desteklenir
+  const openTL = (httpsUrl)=>{
+    const TMA = window.Telegram?.WebApp;
+    if (TMA?.openTelegramLink) TMA.openTelegramLink(httpsUrl);
+    else window.location.href = httpsUrl;
+  };
+
+  // Username'i TIKLAMA ANINDA çöz (STUDENTS sonradan yüklenmiş olabilir)
+  const resolveUsername = ()=>{
+    const userId = String(r.userId || '');
+    const fromReport = (r.username || '').replace(/^@/, '');
+    const fromStudents = (window.STUDENTS?.[userId]?.username || '').replace(/^@/, '');
+    return fromReport || fromStudents || '';
+  };
+
+  // Rapor kartının kapsayıcısını bul
+  const resolveContainer = ()=>{
+    // Önce en yakın .content
+    const c1 = row.closest('.content');
+    if (c1) return c1;
+    // Cards yapısı varsa
+    const c2 = row.closest('.card');
+    if (c2) return c2;
+    // En azından parent
+    return row.parentElement || document.body;
+  };
+
+  // Ortak iş: sohbeti aç
+  const goChat = (username, text) => {
+    if (username) {
+      openTL(`https://t.me/${encodeURIComponent(username)}`);
+    } else {
+      // Username yoksa paylaşım sayfasına düş
+      openTL(`https://t.me/share/url?url=${encodeURIComponent(shareLink)}&text=${encodeURIComponent(text)}`);
+    }
+  };
+
+  // 📋 Kopyala + Mesaj
+  btnCap.addEventListener('click', async ()=>{
+    const username = resolveUsername();
+    const container = resolveContainer();
+
+    // Görsel kopyala dene
+    let copied = false;
+    try {
+      if (window.html2canvas) {
+        const canvas = await html2canvas(container, {
+          backgroundColor: '#ffffff',
+          useCORS: true,
+          scale: window.devicePixelRatio || 1
+        });
+        const blob = await new Promise(res => canvas.toBlob(res, 'image/png', 1));
+        if (navigator.clipboard && window.ClipboardItem && blob) {
+          await navigator.clipboard.write([ new ClipboardItem({ 'image/png': blob }) ]);
+          copied = true;
+        }
+      }
+    } catch(_) { /* sessiz geç */ }
+
+    // Görsel kopyalanamadıysa link metnini kopyala
+    if (!copied) {
+      try { await navigator.clipboard.writeText(fallbackText); } catch(_) {}
+    }
+
+    // Sohbeti aç
+    goChat(username, fallbackText);
+  });
+
+  // 💬 Rapora Cevap Yaz (eski davranış, ama username'i tıklandığında çöz)
+  btnMsg.addEventListener('click', async ()=>{
+    const username = resolveUsername();
+    try { await navigator.clipboard.writeText(fallbackText); } catch(_) {}
+    goChat(username, fallbackText);
+  });
+
+  return row;
+}
+
+
+
+    function render(data){
+      const { user, reports } = data;
+      document.getElementById('who').textContent =
+        user ? `Giriş: 🕵🏻‍♂️ ${user.name || ''} (#${user.id})` : '';
+
+      const list = document.getElementById('list');
+      list.innerHTML = '';
+
+      if (!reports || reports.length===0){
+        document.getElementById('empty').hidden = false;
+        return;
+      }
+      document.getElementById('empty').hidden = true;
+
+      for (const r of reports){
+        const title = `🌻${r.studentName || 'Bilinmeyen Öğrenci'} • ${r.examTitle || 'Sınav'}`;
+        const metaTxt = new Date(r.createdAt).toLocaleDateString('tr-TR',{day:'2-digit',month:'long'})+' '+
+                        new Date(r.createdAt).toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'});
+        const imgSrc = r.photoPath ? normalizeUploadPath(r.photoPath) : '';
+
+        const imgBlock = imgSrc
+          ? el('div', { class:'gallery' },
+              el('a', { href: imgSrc, 'data-pswp-width':'1600', 'data-pswp-height':'900' },
+                el('img', { 'data-src': imgSrc, alt:'Soru', class:'thumb' })
+              )
+            )
+          : el('div', { class:'meta', text:'Fotoğraf yok' });
+
+
+        const det = el('details', {},
+          el('summary', {},
+            el('span', { text: title }),
+            el('span', { class:'meta', text: metaTxt })
+          ),
+          el('div', { class:'content' },
+            imgBlock,
+            el('div', {},
+              el('div', { class:'meta', text:'Rapor' }),
+              el('div', { text: r.reportText || '(boş)' })
+            ),
+            // Cevap aksiyonları
+            replyRow(r, imgSrc)
+          )
+        );
+
+        // 🌟 YENİ EKLEME: Details açıldığında lazy loading'i uygula
+        det.addEventListener('toggle', () => {
+            if (!det.open) return; // Kapanıyorsa bir şey yapma
+            
+            const img = det.querySelector('img[data-src]');
+            if (img) {
+                const dataSrc = img.getAttribute('data-src');
+                if (dataSrc) {
+                    img.setAttribute('src', dataSrc);
+                    img.removeAttribute('data-src'); // Yüklendikten sonra niteliği temizle
+                    
+                    // PhotoSwipe için genişlik/yükseklik hesaplamasını bu noktada tetikle
+                    const a = img.closest('a');
+                    if (a) {
+                        img.addEventListener('load', () => {
+                            a.setAttribute('data-pswp-width', img.naturalWidth || 1600);
+                            a.setAttribute('data-pswp-height', img.naturalHeight || 900);
+                        }, { once: true });
+                    }
+                }
+            }
+        });
+        // 🌟 YENİ EKLEME SONU
+        list.append(det);
+      }
+      if (window._initLightbox) window._initLightbox();
+    }
+
+    if (!TMA) {
+      showDenied('Bu sayfa Telegram Mini Apps içinden açılmalıdır.');
+    } else {
+      try { TMA.ready(); TMA.expand(); } catch(_) {}
+      const initData = TMA.initData || '';
+
+      document.getElementById('who').textContent = `initData len=${initData.length}`;
+
+      async function call(path, body) {
+        const res = await fetch(path, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ initData, ...body })
+        });
+        return res.json();
+      }
+
+      (async function bootstrap(){
+        try {
+          if (!initData || initData.length < 20) {
+            showDenied('initData boş geliyor. Paneli Telegram içindeki butondan açın.');
+            return;
+          }
+          const data = await call('/api/admin/bootstrap', {});
+          if (!data.ok) {
+            showDenied(`Yetkiniz yok veya imza doğrulanamadı. Hata: ${data.error || 'unknown'}`);
+            return;
+          }
+
+          ///öğrenci bilgisi çağrısı
+          let STUDENTS = {};
+            try {
+              const res2 = await call('/api/admin/students', {});   // initData zaten ekleniyor
+              if (res2.ok && res2.students) STUDENTS = res2.students;
+            } catch {}
+            window.STUDENTS = STUDENTS; // global cache
+
+          render(data);
+
+
+          document.getElementById('studentsBtn').onclick = () => { location.href = '/students'; };
+          document.getElementById('examsBtn').onclick    = () => { location.href = '/exams'; };
+        } catch (e) {
+          console.error('bootstrap error', e);
+          showDenied('İstemci hatası');
+        }
+      })();
+    }
+
+    window.addEventListener('error', e => console.error('WINERR', e.message));
+  </script>
+
+            <!---- burası öğrencilere mesaj gönderme kısmı-->
+            <style>
+          .msgbox{
+            position:fixed; inset:0; background:rgba(0,0,0,0.65);
+            display:none; align-items:center; justify-content:center; z-index:99;
+          }
+          .msgpanel{
+            background:#1d1d25; border:1px solid #333; border-radius:16px;
+            padding:20px; width:90%; max-width:420px; color:#eee; display:grid; gap:12px;
+          }
+          .msgpanel textarea{
+            width:100%; min-height:100px; resize:vertical;
+            border-radius:8px; border:1px solid #444; background:#121218;
+            color:#fff; padding:10px; font-size:15px;
+          }
+          .msgpanel .btnrow{display:flex;justify-content:space-between;gap:10px;}
+          .msgpanel button{
+            flex:1; padding:10px; border:0; border-radius:8px;
+            font-weight:700; cursor:pointer;
+          }
+          .btnSend{background:#8be3b5;color:#121212;}
+          .btnClose{background:#444;color:#fff;}
+          .msgicon{
+            position:fixed; bottom:20px; right:20px; background:#b69df8; color:#111;
+            border:0; border-radius:50%; width:56px; height:56px;
+            display:flex; align-items:center; justify-content:center;
+            font-size:28px; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,0.4);
+          }
+          </style>
+
+          <button class="msgicon" title="Öğrencilere mesaj gönder">💬</button>
+
+          <div class="msgbox" id="msgbox">
+            <div class="msgpanel">
+              <div><b>Öğrencilere Mesaj Gönder</b></div>
+              <textarea id="msgText" placeholder="Mesajınızı yazın..."></textarea>
+              <div class="btnrow">
+                <button class="btnSend" id="btnSendMsg">Gönder</button>
+                <button class="btnClose" id="btnCloseMsg">Kapat</button>
+              </div>
+            </div>
+          </div>
+
+          <script>
+          const msgbox=document.getElementById('msgbox');
+          const btnIcon=document.querySelector('.msgicon');
+          const btnSend=document.getElementById('btnSendMsg');
+          const btnClose=document.getElementById('btnCloseMsg');
+          const textarea=document.getElementById('msgText');
+
+          btnIcon.onclick=()=>{ msgbox.style.display='flex'; textarea.focus(); };
+          btnClose.onclick=()=>{ msgbox.style.display='none'; textarea.value=''; };
+
+          btnSend.onclick=async ()=>{
+            const text=textarea.value.trim();
+            if(!text){ alert('Mesaj boş olamaz.'); return; }
+            btnSend.disabled=true; btnSend.textContent='Gönderiliyor...';
+            try{
+              const r=await fetch('/api/admin/broadcast',{
+                method:'POST',
+                headers:{'content-type':'application/json'},
+                body:JSON.stringify({ initData:window.Telegram?.WebApp?.initData || '', message:text })
+              });
+              const j=await r.json();
+              alert(j.ok ? `Gönderildi: ${j.sent} öğrenciye` : `Hata: ${j.error||'bilinmiyor'}`);
+            }catch(e){ alert('Sunucu hatası'); }
+            btnSend.disabled=false; btnSend.textContent='Gönder';
+            msgbox.style.display='none'; textarea.value='';
+          };
+          </script>
+
+</body>
+</html>

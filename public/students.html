@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Öğrenci Listesi</title>
+
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/photoswipe@5/dist/photoswipe.css">
+
+  <style>
+   :root{ --bg:#0f0f13; --surface:#15151a; --text:#eaeaea; --muted:#b6b6bf; --primary:#b69df8; --outline:#2b2b33; }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-family:Roboto,system-ui,Arial,sans-serif}
+    .wrap{max-width:960px;margin:0 auto;padding:16px}
+    header{position:sticky;top:0;background:var(--surface);border-bottom:1px solid var(--outline);padding:6px 8px;z-index:10}
+    h1{font-size:18px;margin:0}
+    .headerbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    }
+
+    .headerbar .right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    }
+
+    .back {
+    border: 0;
+    border-radius: 999px;
+    background: #8be3b5;
+    color: #121212;
+    padding: 8px 12px;
+    font-weight: 700;
+    cursor: pointer;
+    }
+    .meta{color:var(--muted);font-size:12px}
+    .list{display:grid;gap:8px;margin-top:12px}
+    details{background:var(--surface);border:1px solid var(--outline);border-radius:14px;overflow:hidden}
+    summary{list-style:none;padding:12px 14px;cursor:pointer;font-weight:500;display:flex;justify-content:space-between;gap:12px}
+    summary::-webkit-details-marker{display:none}
+    .right{display:flex;gap:10px;align-items:center}
+    .chip{border:1px solid var(--outline);border-radius:999px;padding:2px 8px;font-size:12px;color:var(--muted)}
+    .content{border-top:1px solid var(--outline);padding:12px 14px;display:grid;gap:14px}
+    .card{border:1px solid var(--outline);border-radius:12px;padding:10px 12px;display:grid;gap:8px}
+    .row{display:flex;justify-content:space-between;gap:12px}
+    img{max-width:100%;height:auto;border-radius:10px;border:1px solid var(--outline)}
+    .empty{color:var(--muted);text-align:center;padding:24px 6px}
+    .back{border:0;border-radius:999px;background:#8be3b5;color:#121212;padding:8px 12px;font-weight:700;cursor:pointer;margin-top:8px}
+  /* reply row */
+ .actions {
+  display: flex;
+  justify-content: flex-end;   /* sağa hizalar */
+  align-items: center;
+  margin-top: 6px;
+  gap: 6px;
+}
+.replyBtn {
+  background: none;
+  border: 0;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.replyBtn:hover { color: var(--text); }
+.minilink {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 12px;
+  opacity: 0.6;
+}
+.minilink:hover { opacity: 1; }
+
+  </style>
+  <script type="module">
+  import PhotoSwipeLightbox from 'https://unpkg.com/photoswipe@5/dist/photoswipe-lightbox.esm.min.js';
+  window._initLightbox = () => {
+    if (window._pswp) { window._pswp.destroy(); window._pswp = null; }
+    const lb = new PhotoSwipeLightbox({
+      gallery: '.gallery',
+      children: 'a',
+      pswpModule: () => import('https://unpkg.com/photoswipe@5/dist/photoswipe.esm.min.js')
+    });
+    lb.init();
+    window._pswp = lb;
+  };
+</script>
+</head>
+<body>
+<header>
+  <div class="wrap headerbar">
+    <div class="left">
+      <h1>⚡ Öğrenci Listesi</h1>
+    </div>
+    <div class="right">
+      <div id="who" class="meta"></div>
+      <button class="back" onclick="history.back()">🏡 Ana sayfa</button>
+    </div>
+  </div>
+</header>
+
+  <main class="wrap">
+    <div id="denied" class="empty" hidden>Yetkiniz yok.</div>
+    <div id="empty" class="empty" hidden>Kayıtlı rapor yok.</div>
+    <div id="list" class="list"></div>
+  </main>
+
+  <script>
+    const TMA = window.Telegram?.WebApp;
+    TMA?.ready(); TMA?.expand();
+    const initData = TMA?.initData || '';
+
+    function showDenied(msg){
+      const el = document.getElementById('denied');
+      el.hidden = false; el.textContent = msg;
+    }
+
+    function el(tag, attrs={}, ...kids){
+      const n = document.createElement(tag);
+      for (const [k,v] of Object.entries(attrs)) {
+        if (k==='class') n.className=v;
+        else if (k==='text') n.textContent=v;
+        else n.setAttribute(k,v);
+      }
+      for (const k of kids) n.append(k);
+      return n;
+    }
+
+    function normalizeUploadPath(p){
+      if (!p) return '';
+      const i = p.replace(/\\/g,'/').lastIndexOf('/uploads/');
+      if (i >= 0) return p.replace(/.*\/uploads\//,'/uploads/');
+      if (p.includes('uploads/')) return '/' + p.substring(p.indexOf('uploads/'));
+      return p;
+    }
+
+    async function call(path, body){
+      const r = await fetch(path, {
+        method:'POST',
+        headers:{'content-type':'application/json'},
+        body: JSON.stringify({ initData, ...body })
+      });
+      return r.json();
+    }
+
+    function replyRow(r, imgSrc){
+          const row = el('div', { class:'actions' });
+
+          const shareLink = r.id ? (location.origin + `/share/report/${r.id}`)
+                                : (imgSrc ? location.origin + imgSrc : location.origin);
+
+          const text = [ `${shareLink}` ].join('\n');
+
+          // username öncelik: report -> students.json
+          const userIdStr   = String(r.userId ?? '').trim();
+          const fromReport  = String(r.username || '').replace(/^@/, '').trim();
+          const fromStudent = (() => {
+            const map = window.STUDENTS || {};
+            const rec = map[userIdStr];
+            return rec && rec.username ? String(rec.username).replace(/^@/, '').trim() : '';
+          })();
+          const username = fromReport || fromStudent;
+
+          const btn  = el('button', { class:'replyBtn', type:'button' }, '💬 Rapora Cevap Yaz');
+          const link = el('a', { class:'minilink', href: shareLink, target:'_blank' }, '↗');
+          row.append(btn, link);
+
+          btn.addEventListener('click', async () => {
+            try { await navigator.clipboard.writeText(text); } catch {}
+
+            const TMA = window.Telegram?.WebApp;
+            const open = (url)=>{
+              if (TMA?.openTelegramLink) TMA.openTelegramLink(url);
+              else window.location.href = url;
+            };
+
+            if (username){
+              setTimeout(()=>open(`https://t.me/${encodeURIComponent(username)}`), 150);
+            } else if (userIdStr){
+              setTimeout(()=>open(`tg://user?id=${encodeURIComponent(userIdStr)}`), 150);
+              setTimeout(()=>open(`https://t.me/share/url?url=${encodeURIComponent(shareLink)}&text=${encodeURIComponent(text)}`), 800);
+            } else {
+              open(`https://t.me/share/url?url=${encodeURIComponent(shareLink)}&text=${encodeURIComponent(text)}`);
+            }
+          });
+
+          return row;
+    }
+
+
+    async function load(){
+      if (!initData || initData.length < 20) {
+        showDenied('initData boş. Paneli Telegram içindeki butondan açın.');
+        return;
+      }
+      const boot = await call('/api/admin/students', {});
+      if (!boot.ok) { showDenied(boot.error || 'yetki'); return; }
+
+     const { stats, students } = boot;
+     window.STUDENTS = students || {};
+      if (!stats || stats.length === 0) { document.getElementById('empty').hidden = false; return; }
+
+      //document.getElementById('who').textContent = ``;
+
+      const list = document.getElementById('list');
+      list.innerHTML = '';
+
+      for (const s of stats){
+        const title = `${s.studentName}`;
+        const right = el('div', { class:'right' },
+          el('span', { class:'chip', text: `${s.reportCount} Rapor` }),
+          el('span', {
+            class: 'meta',
+            text: s.lastReportAt
+                ? new Date(s.lastReportAt).toLocaleDateString('tr-TR', {
+                    day: '2-digit',
+                    month: 'short',
+                }) +
+                ' ' +
+                new Date(s.lastReportAt).toLocaleTimeString('tr-TR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                })
+                : '—'
+            })
+        );
+
+        const det = el('details', {},
+          el('summary', {}, el('span', { text: title }), right),
+          el('div', { class:'content' }, el('div', { class:'meta', text:'Yükleniyor...' }))
+        );
+
+        // Tıklandığında raporları yükle
+        det.addEventListener('toggle', async () => {
+          if (!det.open) return;
+          const body = det.querySelector('.content');
+          body.innerHTML = '<div class="meta">Yükleniyor...</div>';
+          const resp = await call('/api/admin/studentReports', { userId: s.userId });
+          if (!resp.ok) { body.innerHTML = '<div class="meta">Hata</div>'; return; }
+
+          const reports = resp.reports || [];
+          if (reports.length === 0) { body.innerHTML = '<div class="meta">Bu öğrenci için rapor bulunamadı.</div>'; return; }
+
+          body.innerHTML = '';
+         for (const r of reports){
+              const imgSrc = r.photoPath ? normalizeUploadPath(r.photoPath) : '';
+              const ts = new Date(r.createdAt);
+              const metaTxt =
+                ts.toLocaleDateString('tr-TR', { day:'2-digit', month:'long' }) + ' ' +
+                ts.toLocaleTimeString('tr-TR', { hour:'2-digit', minute:'2-digit' });
+
+              const card = el('div', { class:'card' },
+                el('div', { class:'row' },
+                  el('div', { class:'meta', text: r.examTitle || 'Sınav' }),
+                  el('div', { class:'meta', text: metaTxt })
+                ),
+                imgSrc
+                  ? el('div', { class:'gallery' },
+                      el('a', {
+                        href: imgSrc,
+                        'data-pswp-width':'1600',
+                        'data-pswp-height':'900'
+                      },
+                        el('img', { 'data-src': imgSrc, alt:'Soru', class:'thumb' })                      )
+                    )
+                  : el('div', { class:'meta', text:'Fotoğraf yok' }),
+                el('div', {},
+                  el('div', { class:'meta', text:'Rapor' }),
+                  el('div', { text: r.reportText || '(boş)' })
+                )
+              );
+
+              if (imgSrc){
+                const a = card.querySelector('a');
+                const im = card.querySelector('img');
+                im.addEventListener('load', ()=>{
+                  a.setAttribute('data-pswp-width',  im.naturalWidth  || 1600);
+                  a.setAttribute('data-pswp-height', im.naturalHeight || 900);
+                });
+              }
+
+              card.append(replyRow(r, imgSrc));
+
+
+              body.append(card);
+            }
+
+            // 🌟 YENİ EKLEME: Lazy Loading'i uygula
+            body.querySelectorAll('img[data-src]').forEach(img => {
+                const dataSrc = img.getAttribute('data-src');
+                if (dataSrc) {
+                    img.setAttribute('src', dataSrc);
+                    img.removeAttribute('data-src'); // İsteğe bağlı: temizlik
+                }
+            });
+            // 🌟 YENİ EKLEME SONU
+
+            // render sonunda:
+            if (window._initLightbox) window._initLightbox();
+
+        }, { once:false });
+
+        list.append(det);
+      }
+    }
+
+    load().catch(()=>showDenied('istemci hatası'));
+  </script>
+</body>
+</html>
